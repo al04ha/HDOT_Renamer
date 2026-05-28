@@ -1,0 +1,14 @@
+{
+    "bid_tab": {
+        "description": "Bid tabulations, contractor pricing sheets, or estimate comparisons.",
+        "naming_convention": "projectname_date_bidtab"
+    },
+    "land_plotting": {
+        "description": "Surveys, boundary maps, deeds, or parcel plotting documents.",
+        "naming_convention": "projectname_date_survey"
+    },
+    "contractor_agreement": {
+        "description": "Legal contracts, signed agreements, master service agreements, or scopes of work.",
+        "naming_convention": "projectname_date_agreement"
+    }
+}
