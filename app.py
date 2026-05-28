@@ -118,3 +118,22 @@ if not st.session_state.logged_in:
 # =============================================================
 is_master = (st.session_state.user_role == "Master Admin")
 is_dev = (st.session_state.user_role == "Developer Admin")
+
+with st.sidebar:
+    st.title("🛡️ Identity Access")
+    st.markdown(f"**User ID:** `{st.session_state.username}`")
+    st.markdown(f"**Security Profile:** `{st.session_state.user_role}`")
+    
+    available_views = ["User Portal"]
+    if is_master or is_dev:
+        available_views.insert(0, "Developer Control Console")
+    if is_master:
+        available_views.insert(0, "Master Administration")
+        
+    view_mode = st.selectbox("Switch Workspace View:", available_views)
+    st.markdown("---")
+    if st.button("Log Out / Terminate Session", type="secondary"):
+        st.session_state.logged_in = False
+        st.session_state.username = ""
+        st.session_state.user_role = ""
+        st.rerun()
