@@ -8,20 +8,16 @@ import google.genai as genai
 from pydantic import BaseModel
 
 # --- MANDATORY FIRST STREAMLIT ACTION ---
-# This must run at the absolute start of execution before any other st. commands
 st.set_page_config(page_title="Enterprise Document Pipeline", layout="wide")
 
 # --- HYBRID ENVIRONMENT LOADERS ---
-# 1. Local Fallback: Load .env if running on your machine
 env_path = Path(__file__).resolve().parent / '.env'
 if env_path.exists():
     load_dotenv(dotenv_path=env_path)
 
-# 2. Cloud Fallback: Pull from Streamlit Secrets store if running in production
 if "GEMINI_API_KEY" in st.secrets:
     os.environ["GEMINI_API_KEY"] = st.secrets["GEMINI_API_KEY"]
 
-# 3. Enforcement Guardrail
 if not os.getenv("GEMINI_API_KEY"):
     st.error("Error: GEMINI_API_KEY configuration token not detected in system memory. Check your cloud Secrets or local .env file.")
     st.stop()
@@ -38,15 +34,29 @@ def load_json_file(file_path: Path, fallback_data: dict) -> dict:
     if not file_path.exists():
         return fallback_data
     with open(file_path, "r") as f:
-        return json.load(f)
+        try:
+            data = json.load(f)
+            return data if data else fallback_data
+        except json.JSONDecodeError:
+            return fallback_data
 
 def save_json_file(file_path: Path, data: dict):
     with open(file_path, "w") as f:
         json.dump(data, f, indent=4)
 
-# Load databases from local persistent disk space
+# Load databases with structural fail-safes
 doc_registry = load_json_file(REGISTRY_FILE, {"bid_tab": {"description": "Bid tabs.", "naming_convention": "projectname_date_bidtab"}})
-user_db = load_json_file(USERS_FILE, {})
+
+# Pre-seeded directory fallback to protect admin elevation paths
+DEFAULT_USERS = {
+    "admin": {
+        "password_hash": hash_password("hdotadmin2026"),  # Change these defaults anytime
+        "role": "Master Admin"
+    }
+}
+user_db = load_json_file(USERS_FILE, DEFAULT_USERS)
+if not user_db:
+    user_db = DEFAULT_USERS
 
 class DocumentClassifier(BaseModel):
     identified_category: str  
@@ -81,7 +91,9 @@ if not st.session_state.logged_in:
                     if user_db[username_input]["password_hash"] == hash_password(password_input):
                         st.session_state.logged_in = True
                         st.session_state.username = username_input
-                        st.session_state.user_role = user_db[username_input]["role"]
+                        # Fallback mapping if database role field reads empty or corrupt
+                        stored_role = user_db[username_input].get("role", "User Portal")
+                        st.session_state.user_role = stored_role if stored_role else "User Portal"
                         st.success("Access Granted. Redirecting...")
                         st.rerun()
                     else:
@@ -137,3 +149,182 @@ with st.sidebar:
         st.session_state.username = ""
         st.session_state.user_role = ""
         st.rerun()
+
+# =============================================================
+# VIEW 1: MASTER ADMINISTRATION (User Governance Engine)
+# =============================================================
+if view_mode == "Master Administration":
+    st.title("👑 Master Identity & Governance Panel")
+    st.write("Modify organizational system access and elevate standard accounts to administrative tiers.")
+    
+    st.subheader("➕ Provision/Elevate Privileged Staff Account")
+    col_u, col_p, col_r = st.columns(3)
+    with col_u:
+        m_user = st.text_input("Username", placeholder="e.g., manager_dev").strip().lower()
+    with col_p:
+        m_pass = st.text_input("Password", type="password").strip()
+    with col_r:
+        m_role = st.selectbox("Target Security Privilege Level", ["User Portal", "Developer Admin", "Master Admin"])
+        
+    if st.button("Commit Identity Configuration", type="primary"):
+        if not m_user or not m_pass:
+            st.error("Valid authentication parameters required.")
+        else:
+            user_db[m_user] = {
+                "password_hash": hash_password(m_pass),
+                "role": m_role
+            }
+            save_json_file(USERS_FILE, user_db)
+            st.success(f"Identity system updated: registered `{m_user}` with `{m_role}` permissions.")
+            st.rerun()
+
+    st.markdown("---")
+    st.subheader("👥 System Account Directory Control")
+    for username, data in list(user_db.items()):
+        is_self = (username == st.session_state.username)
+        with st.container(border=True):
+            u_info, u_action = st.columns([4, 1])
+            with u_info:
+                st.markdown(f"**Account ID:** `{username}`")
+                st.markdown(f"**Active Permission Bound:** `{data.get('role', 'User Portal')}`")
+            with u_action:
+                if st.button(f"Revoke: {username}", key=f"m_del_{username}", type="secondary", disabled=is_self):
+                    del user_db[username]
+                    save_json_file(USERS_FILE, user_db)
+                    st.warning(f"Identity `{username}` deleted from system tables.")
+                    st.rerun()
+
+# =============================================================
+# VIEW 2: DEVELOPER CONTROL CONSOLE (Taxonomy Configuration)
+# =============================================================
+elif view_mode == "Developer Control Console":
+    st.title("🛠️ Developer Administrative Dashboard")
+    st.write("Modify the live pipeline classification rules and system taxonomy matrices.")
+
+    st.subheader("➕ Register New Document Target")
+    col_key, col_rule = st.columns(2)
+    with col_key:
+        new_key = st.text_input("Unique System Key", placeholder="e.g., environmental_report").strip().lower()
+    with col_rule:
+        new_convention = st.text_input("Naming Convention Rule", value="projectname_date_suffix")
+        
+    new_description = st.text_area("Prompt Engineering Context / AI Instructions", placeholder="Describe document properties...")
+    
+    if st.button("Save New Specification", type="primary"):
+        if not new_key or not new_description:
+            st.error("Validation Error: System Key and Instructions are mandatory fields.")
+        elif "projectname" not in new_convention or "date" not in new_convention:
+            st.error("Validation Error: Format rule must contain 'projectname' and 'date' tokens.")
+        else:
+            doc_registry[new_key] = {"description": new_description, "naming_convention": new_convention}
+            save_json_file(REGISTRY_FILE, doc_registry)
+            st.success(f"System key `{new_key}` compiled to disk storage.")
+            st.rerun()
+
+    st.markdown("---")
+    st.subheader("🗑️ Active Pipeline Registry")
+    for key, config in list(doc_registry.items()):
+        with st.container(border=True):
+            c_data, c_action = st.columns([4, 1])
+            with c_data:
+                st.markdown(f"### System Registry Key: `{key}`")
+                st.markdown(f"**Naming Convention:** `{config['naming_convention']}`")
+                st.markdown(f"**AI Guidance:** *{config['description']}*")
+            with c_action:
+                if st.button(f"Purge Key: {key}", key=f"del_{key}", type="secondary"):
+                    del doc_registry[key]
+                    save_json_file(REGISTRY_FILE, doc_registry)
+                    st.warning(f"Purged `{key}`.")
+                    st.rerun()
+
+# =============================================================
+# VIEW 3: USER PORTAL (Execution Pipeline Fail-Safe Routing)
+# =============================================================
+else:
+    st.title("📂 Automated Document Ingestion Workspace")
+    st.write("Drop files below to automatically audit, map, and rename records to compliance schemas.")
+
+    uploaded_files = st.file_uploader(
+        "Upload files for parsing (Max 5 documents concurrently)", 
+        type=["pdf", "png", "jpg", "jpeg", "txt", "docx"],
+        accept_multiple_files=True
+    )
+
+    if uploaded_files:
+        if len(uploaded_files) > 5:
+            st.error("Exceeded maximum batch handling volume. Please filter down to 5 records.")
+            st.stop()
+            
+        if st.button("Execute Ingestion Pipeline", type="primary"):
+            for uploaded_file in uploaded_files:
+                with st.status(f"Parsing: {uploaded_file.name}...", expanded=False) as status:
+                    try:
+                        temp_path = Path(uploaded_file.name)
+                        with open(temp_path, "wb") as f:
+                            f.write(uploaded_file.getbuffer())
+
+                        gemini_file = client.files.upload(file=temp_path)
+                        registry_context = "\n".join([f"- {k}: {v['description']}" for k, v in doc_registry.items()])
+                        
+                        prompt = f"""
+                        You are an automated administrative document processor. Process this transaction file:
+                        
+                        TASK 1: Categorize this record into exactly one of these enterprise keys:
+                        {registry_context}
+                        If it matches no descriptors, yield 'unknown_general'.
+                        
+                        TASK 2: Extract primary tracking parameters.
+                        - project_name: Strip spaces/special characters, format lowercase.
+                        - document_date: Map strictly to YYYY-MM-DD. If null, return 'no-date'.
+                        """
+
+                        response = client.models.generate_content(
+                            model="gemini-2.5-flash",
+                            contents=[gemini_file, prompt],
+                            config={
+                                "response_mime_type": "application/json",
+                                "response_schema": DocumentClassifier,
+                            }
+                        )
+
+                        result = json.loads(response.text)
+                        cat = result.get("identified_category", "unknown_general")
+                        proj = result.get("project_name", "unknown-project").replace(" ", "-").lower()
+                        dt = result.get("document_date", "no-date")
+                        
+                        if cat not in doc_registry:
+                            convention = "projectname_date_general"
+                            cat_label = "UNKNOWN_GENERAL"
+                        else:
+                            convention = doc_registry[cat]["naming_convention"]
+                            cat_label = cat.upper()
+                            
+                        final_name = convention.replace("projectname", proj).replace("date", dt)
+                        final_filename = f"{final_name}{temp_path.suffix}"
+                        
+                        status.update(label=f"✅ Finished Processing: {uploaded_file.name}", state="complete")
+                        
+                        with st.container(border=True):
+                            col1, col2 = st.columns([3, 1])
+                            with col1:
+                                st.markdown(f"**Source File Name:** `{uploaded_file.name}`")
+                                st.markdown(f"**Enterprise Taxonomy Category:** :green[[{cat_label}]]")
+                                st.markdown(f"**Standardized Target Output:** `{final_filename}`")
+                                st.caption(f"*System Logging Metadata:* {result.get('confidence_explanation')}")
+                            with col2:
+                                with open(temp_path, "rb") as f:
+                                    file_bytes = f.read()
+                                st.download_button(
+                                    label="Download Normal Record",
+                                    data=file_bytes,
+                                    file_name=final_filename,
+                                    mime=uploaded_file.type,
+                                    key=f"dl_{uploaded_file.name}"
+                                )
+
+                        if temp_path.exists():
+                            os.remove(temp_path)
+
+                    except Exception as error:
+                        status.update(label=f"❌ Transaction Failure: {uploaded_file.name}", state="error")
+                        st.error(f"Error trace: {error}")
