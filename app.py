@@ -64,7 +64,9 @@ if "user_role" not in st.session_state:
 if not st.session_state.logged_in:
     st.set_page_config(page_title="Gateway - Document Pipeline", layout="centered")
     st.title("🔐 Enterprise Document Gateway")
-    
+else:
+    st.title("📂 Automated Document Ingestion Workspace")
+    st.write("DEBUG CHECK: If you can see this text, the view selector is working perfectly!")   
     tab_signin, tab_signup = st.tabs(["🔒 Account Sign In", "📝 Create Account (Sign Up)"])
     
     with tab_signin:
