@@ -460,4 +460,4 @@ TASK 2: Extract primary tracking parameters.
                             os.remove(temp_path)
                     except Exception as error:
                         status.update(label=f"❌ Transaction Failure: {uploaded_file.name}", state="error")
-                        st.error(f"Error trace: {error}"
+                        st.error(f"Error trace: {error}")
